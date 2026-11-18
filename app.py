@@ -292,7 +292,7 @@ def main():
     # ==================== ONGLET 1 : ANALYSER ====================
     with onglet1:
         st.subheader("Importer vos tickets de caisse (PDF)")
-        f = st.file_uploader(
+        fichiers = st.file_uploader(
             "Déposez votre ticket (PDF ou photo)",
             type=["pdf", "jpg", "jpeg", "png", "webp", "heic"],
             accept_multiple_files=True
