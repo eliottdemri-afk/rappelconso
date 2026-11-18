@@ -287,14 +287,14 @@ def main():
                 st.session_state["derniers_resultats"] = res
                 st.info("Mode SIMULATION activé : un produit en alerte (orange) et un produit sain (vert) sont affichés.")
 
-    onglet1, onglet2, onglet3 = st.tabs(["📤 ANALYSER", "🗂️ MES TICKETS", "🔔 ALERTES"])
+    onglet1, onglet2, onglet3 = st.tabs(["ANALYSER", "MES TICKETS", "ALERTES"])
 
     # ==================== ONGLET 1 : ANALYSER ====================
     with onglet1:
         st.subheader("Importer vos tickets de caisse (PDF)")
-        fichiers = st.file_uploader(
-            "Glissez-déposez un ou plusieurs tickets au format PDF (les fichiers originaux ne sont jamais conservés)",
-            type=["pdf"],
+        f = st.file_uploader(
+            "Déposez votre ticket (PDF ou photo)",
+            type=["pdf", "jpg", "jpeg", "png", "webp", "heic"]
             accept_multiple_files=True,
         )
 
