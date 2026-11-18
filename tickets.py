@@ -2,6 +2,7 @@
 import io
 import re
 import fitz  # PyMuPDF
+import pillow_heif
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
