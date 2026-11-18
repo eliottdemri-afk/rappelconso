@@ -33,9 +33,12 @@ ENSEIGNES_CONNUES: dict[str, list[str]] = {
 # 1. "PAQUITO ABC ORANGE B 2,04 EUR A" ou "BOUTON D'OR TUILES S 1,47 EUR"
 # 2. "LAIT DEMI ECREME 1,15 €" ou "YAOURT NATURE X4 2,30 A"
 PATTERNS_ARTICLES = [
-    re.compile(r"^(?P<libelle>[A-Z0-9À-Ÿ\*][A-Z0-9À-Ÿ\s\.\-\'\/\&\+\*%]{2,}?)\s+(?P<prix>-?\d+[,\.]\d{2})\s*(?:EUR|€)?(?:\s+[A-Z0-9]{1,2})?$"),
+    re.compile(
+        r"^(?P<libelle>[A-Z0-9À-Ÿ\*][A-Z0-9À-Ÿ\s\.\-\'\/\&\+\*%]{2,}?)"
+        r"\s+(?P<prix>-?\d+\s*[,\.]\s*\d{2})"
+        r"\s*(?:EUR|€)?(?:\s+[A-Z0-9]{1,2})?[\s\.\,\-\|\_]*$"
+    ),
 ]
-
 # Rayons à la coupe sans marque ni référence exploitable
 GENERIQUE = re.compile(
     r"\bTRAD\b|^(POISSONNERIE|BOUCHERIE|BOULANGERIE|CHARCUTERIE|FRUITS|LEGUMES|COUPE)\b",
@@ -105,6 +108,9 @@ def charger_images_ticket(contenu_bytes: bytes, nom_fichier: str) -> list[Image.
 
 
 def preparer_image_ocr(img: Image.Image) -> Image.Image:
+    # Agrandissement x2 si la photo vient d'un téléphone (meilleure détection des virgules et lettres fines)
+    if img.width < 1500:
+        img = img.resize((img.width * 2, img.height * 2), Image.Resampling.LANCZOS)
     img_gris = ImageOps.grayscale(img)
     img_contraste = ImageOps.autocontrast(img_gris, cutoff=2)
     return img_contraste
