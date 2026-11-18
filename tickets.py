@@ -11,6 +11,8 @@ import pdfplumber
 
 from textes import normaliser
 
+pillow_heif.register_heif_opener()
+
 # Dictionnaire de détection des enseignes françaises
 ENSEIGNES_CONNUES: dict[str, list[str]] = {
     "Intermarché": ["intermarche", "itm", "mousquetaires"],
