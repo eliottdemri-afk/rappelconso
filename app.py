@@ -77,7 +77,7 @@ def verifier_authentification() -> bool:
     if st.session_state.get("authentifie"):
         return True
 
-    st.title("🧾 Mon ticket est-il rappelé ?")
+    st.title("Mon ticket est-il rappelé ?")
     st.info("Application privée de vérification automatique des rappels produits sur tickets de caisse.")
     with st.form("login_form"):
         mdp = st.text_input("Mot de passe d'accès", type="password")
@@ -244,14 +244,14 @@ def main():
         return
 
     db = get_db()
-    st.title("🧾 Mon ticket est-il rappelé ?")
+    st.title("Mon ticket est-il rappelé ?")
     st.caption("Vérification automatique des produits achetés face aux rappels officiels français (RappelConso).")
 
     with st.sidebar:
         st.subheader("État du système")
-        st.write("API Gemini :", "Configurée" if config.cle_gemini_ok() else "❌ Clé manquante")
+        st.write("API Gemini :", "Configurée" if config.cle_gemini_ok() else "Clé manquante")
         st.write("Modèle IA :", f"`{config.GEMINI_MODEL}`")
-        st.write("Alertes Mail :", "SMTP prêt" if config.smtp_ok() else "⚠️ Aperçu seul (SMTP non configuré)")
+        st.write("Alertes Mail :", "SMTP prêt" if config.smtp_ok() else "Aperçu seul (SMTP non configuré)")
         st.divider()
         st.subheader("Mode Démonstration")
         st.caption("Permet de visualiser le déclenchement d'une alerte et l'aperçu d'e-mail sans attendre un rappel réel.")
@@ -295,7 +295,7 @@ def main():
         f = st.file_uploader(
             "Déposez votre ticket (PDF ou photo)",
             type=["pdf", "jpg", "jpeg", "png", "webp", "heic"],
-            accept_multiple_files=True,
+            accept_multiple_files=True
         )
 
         if st.button("Analyser mes tickets", type="primary", disabled=not fichiers):
@@ -335,7 +335,7 @@ def main():
 
             alertes_detectees = [a for a in resultats if a["statut_rappel"] in (STATUT_CONFIRME, STATUT_PROBABLE)]
             if alertes_detectees:
-                with st.expander("✉️ Aperçu de l'e-mail d'alerte généré"):
+                with st.expander("Aperçu de l'e-mail d'alerte généré"):
                     sujet, corps = construire_contenu_mail(alertes_detectees)
                     st.text_input("Sujet", value=sujet, disabled=True)
                     st.text_area("Contenu du message", value=corps, height=220, disabled=True)
@@ -361,14 +361,14 @@ def main():
                         a["libelle"] = a["libelle_original"]
                         a["enseigne"] = t["enseigne"]
                         afficher_carte_article(a)
-                    if st.button("🗑️ Supprimer ce ticket et ses données", key=f"del_{t['id']}"):
+                    if st.button("Supprimer ce ticket et ses données", key=f"del_{t['id']}"):
                         db.supprimer_ticket(t["id"])
                         st.rerun()
 
     # ==================== ONGLET 3 : ALERTES ====================
     with onglet3:
         st.subheader("Suivi des alertes et veille sur les anciens achats")
-        if st.button("🔄 Vérifier les nouveaux rappels", type="primary"):
+        if st.button("Vérifier les nouveaux rappels", type="primary"):
             tous_articles = db.lister_tous_articles_reels()
             if not tous_articles:
                 st.info("Aucun article réel enregistré dans l'historique.")
