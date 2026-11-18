@@ -22,7 +22,6 @@ from tickets import Article, Ticket, lire_ticket_bytes
 
 st.set_page_config(
     page_title="Mon ticket est-il rappelé ?",
-    page_icon="🧾",
     layout="wide",
 )
 
