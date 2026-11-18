@@ -1,10 +1,12 @@
 """Extraction multi-enseignes des tickets de caisse PDF (texte natif + fallback OCR)."""
 import io
 import re
+import fitz  # PyMuPDF
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
+from PIL import Image, ImageOps
 import pdfplumber
 
 from textes import normaliser
@@ -67,6 +69,32 @@ class Ticket:
     articles: list[Article] = field(default_factory=list)
     methode_extraction: str = "texte_pdf"
 
+def charger_images_ticket(contenu_bytes: bytes, nom_fichier: str) -> list[Image.Image]:
+    nom_lower = nom_fichier.lower()
+    images = []
+
+    if nom_lower.endswith(".pdf"):
+        doc = fitz.open(stream=contenu_bytes, filetype="pdf")
+        for page in doc:
+            # Rendu haute résolution (200 DPI) pour un OCR net
+            pix = page.get_pixmap(dpi=200)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            images.append(img)
+    else:
+        # Cas d'une photo (JPG, PNG, WEBP...)
+        img = Image.open(io.BytesIO(contenu_bytes))
+        # Corrige la rotation automatique des photos prises au téléphone (EXIF)
+        img = ImageOps.exif_transpose(img)
+        images.append(img.convert("RGB"))
+
+    return images
+
+def preparer_image_ocr(img: Image.Image) -> Image.Image:
+    # 1. Passage en niveaux de gris
+    img_gris = ImageOps.grayscale(img)
+    # 2. Amélioration du contraste (atténue les ombres du papier froissé)
+    img_contraste = ImageOps.autocontrast(img_gris, cutoff=2)
+    return img_contraste
 
 def detecter_enseigne(texte: str, nom_fichier: str = "") -> str:
     """Identifie l'enseigne à partir du contenu du ticket ou du nom de fichier."""
