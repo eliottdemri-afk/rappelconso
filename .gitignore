@@ -1,0 +1,9 @@
+.env
+config.env
+.cache/
+data/
+*.db
+*.sqlite
+__pycache__/
+.pytest_cache/
+tickets/

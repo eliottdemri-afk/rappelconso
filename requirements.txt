@@ -1,0 +1,8 @@
+streamlit>=1.38.0
+pdfplumber>=0.11.0
+rapidfuzz>=3.9.0
+requests>=2.32.0
+pypdfium2>=4.30.0
+pytesseract>=0.3.13
+psycopg2-binary>=2.9.9
+pytest>=8.3.0

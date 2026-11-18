@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: mon-ticket-est-il-rappele
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    disk:
+      name: rappels-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: SQLITE_PATH
+        value: /data/rappels.db
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: ALERT_EMAIL_TO
+        sync: false
