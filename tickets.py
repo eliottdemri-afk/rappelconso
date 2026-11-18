@@ -1,14 +1,13 @@
-"""Extraction multi-enseignes des tickets de caisse PDF (texte natif + fallback OCR)."""
+"""Extraction multi-enseignes des tickets de caisse PDF et Photos (texte natif + fallback OCR)."""
 import io
 import re
-import fitz  # PyMuPDF
-import pillow_heif
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from pathlib import Path
-
+from datetime import date
+import fitz  # PyMuPDF
 from PIL import Image, ImageOps
+import pillow_heif
 import pdfplumber
+import pytesseract
 
 from textes import normaliser
 
@@ -34,16 +33,8 @@ ENSEIGNES_CONNUES: dict[str, list[str]] = {
 # 1. "PAQUITO ABC ORANGE B 2,04 EUR A" ou "BOUTON D'OR TUILES S 1,47 EUR"
 # 2. "LAIT DEMI ECREME 1,15 €" ou "YAOURT NATURE X4 2,30 A"
 PATTERNS_ARTICLES = [
-    re.compile(r"^(?P<libelle>[A-Z0-9À-Ÿ][A-Z0-9À-Ÿ\s\.\-\'\/\&\+\*%]{2,}?)\s+(?P<prix>-?\d+[,\.]\d{2})\s*(?:EUR|€)?(?:\s+[A-Z0-9]{1,2})?$"),
+    re.compile(r"^(?P<libelle>[A-Z0-9À-Ÿ\*][A-Z0-9À-Ÿ\s\.\-\'\/\&\+\*%]{2,}?)\s+(?P<prix>-?\d+[,\.]\d{2})\s*(?:EUR|€)?(?:\s+[A-Z0-9]{1,2})?$"),
 ]
-
-# Lignes à exclure impérativement (totaux, paiements, fidélité, données personnelles)
-EXCLUSIONS_LIGNES = re.compile(
-    r"\b(TOTAL|SOUS[\s\-]?TOTAL|TVA|CARTE\s+BANCAIRE|CB\s+SANS\s+CONTACT|ESPECES|RENDU|MONNAIE|"
-    r"FIDELITE|CARTE\s+FID|PORTEUR|COMPTE\s+FID|CAGNOTTE|AVANTAGE\s+CARTE|WAOOH|PASS|MERCI\s+DE\s+VOTRE|"
-    r"TICKET\s+CLIENT|DUPLICATA|SIRET|NAF|TEL|CAISSE|HOTESSE|VENDEUR|A\s+PAYER|NET\s+A\s+PAYER)\b",
-    re.IGNORECASE,
-)
 
 # Rayons à la coupe sans marque ni référence exploitable
 GENERIQUE = re.compile(
@@ -55,6 +46,28 @@ DATE_REGEX = [
     re.compile(r"\b(\d{2})[/\-\.](\d{2})[/\-\.](20\d{2})\b"),
     re.compile(r"\b(\d{2})[/\-\.](\d{2})[/\-\.](\d{2})\b"),
 ]
+
+# Marqueurs de fin de liste des articles (tout ce qui suit est du paiement, TVA ou fidélité)
+FIN_LISTE_ARTICLES = re.compile(
+    r"\b(TOTAL|SOUS[\s\-]?TOTAL|MONTANT\s+DU|MONTANT\s+DÛ|NET\s+A\s+PAYER|A\s+PAYER|"
+    r"CB\s+EMV|CB\s+SANS\s+CONTACT|CARTE\s+BANCAIRE|PAIEMENT|REGLEMENT|A\s+RENDRE|RENDU\s+MONNAIE|"
+    r"NOMBRE\s+D['\s]?ARTICLES|NB\s+ARTICLES|ARTICLES\s+VENDUS|RECAPITULATIF\s+TVA)\b",
+    re.IGNORECASE,
+)
+
+# Extraction du compteur officiel X (ex: "NOMBRE D'ARTICLES VENDUS : 9", "9 ARTICLES", "ARTICLES : 9")
+COMPTEUR_ARTICLES = re.compile(
+    r"(?:NOMBRE\s+D['\s]?ARTICLES(?:\s+VENDUS)?|NB\s+ARTICLES|ARTICLES\s+VENDUS)\s*[:=]?\s*(\d+)"
+    r"|\b(\d+)\s+ARTICLES?\b",
+    re.IGNORECASE,
+)
+
+# Lignes parasites éventuelles au sein même de la liste
+EXCLUSIONS_LIGNES = re.compile(
+    r"\b(TVA|FIDELITE|CARTE\s+FID|PORTEUR|COMPTE\s+FID|CAGNOTTE|AVANTAGE|REMISE\s+FID|"
+    r"IL\s+VOUS\s+RESTAIT|SOLDE|TICKET|DUPLICATA|SIRET|CAISSE|HOTESSE|TEL)\b|\d{2}/\d{2}/\d{4}",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -72,6 +85,7 @@ class Ticket:
     articles: list[Article] = field(default_factory=list)
     methode_extraction: str = "texte_pdf"
 
+
 def charger_images_ticket(contenu_bytes: bytes, nom_fichier: str) -> list[Image.Image]:
     nom_lower = nom_fichier.lower()
     images = []
@@ -79,25 +93,33 @@ def charger_images_ticket(contenu_bytes: bytes, nom_fichier: str) -> list[Image.
     if nom_lower.endswith(".pdf"):
         doc = fitz.open(stream=contenu_bytes, filetype="pdf")
         for page in doc:
-            # Rendu haute résolution (200 DPI) pour un OCR net
-            pix = page.get_pixmap(dpi=200)
+            pix = page.get_pixmap(dpi=250)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            images.append(img)
+            images.append(img.convert("RGB"))
     else:
-        # Cas d'une photo (JPG, PNG, WEBP...)
         img = Image.open(io.BytesIO(contenu_bytes))
-        # Corrige la rotation automatique des photos prises au téléphone (EXIF)
         img = ImageOps.exif_transpose(img)
         images.append(img.convert("RGB"))
 
     return images
 
+
 def preparer_image_ocr(img: Image.Image) -> Image.Image:
-    # 1. Passage en niveaux de gris
     img_gris = ImageOps.grayscale(img)
-    # 2. Amélioration du contraste (atténue les ombres du papier froissé)
     img_contraste = ImageOps.autocontrast(img_gris, cutoff=2)
     return img_contraste
+
+
+def _extraire_texte_ocr(contenu: bytes, nom_fichier: str) -> str:
+    """Exécute l'OCR ligne par ligne (--psm 6) sur un PDF ou une photo."""
+    images = charger_images_ticket(contenu, nom_fichier)
+    lignes_ocr = []
+    for img in images:
+        img_prete = preparer_image_ocr(img)
+        txt = pytesseract.image_to_string(img_prete, lang="fra", config="--psm 6")
+        lignes_ocr.append(txt)
+    return "\n".join(lignes_ocr)
+
 
 def detecter_enseigne(texte: str, nom_fichier: str = "") -> str:
     """Identifie l'enseigne à partir du contenu du ticket ou du nom de fichier."""
@@ -124,48 +146,6 @@ def extraire_date(texte: str, nom_fichier: str = "") -> date:
                 except ValueError:
                     continue
     return date.today()
-
-
-def _extraire_texte_ocr(contenu_pdf: bytes) -> str:
-    """Fallback OCR si le PDF est une image scannée (nécessite pypdfium2 + pytesseract)."""
-    try:
-        import pypdfium2 as pdfium
-        import pytesseract
-    except ImportError:
-        return ""
-
-    textes = []
-    pdf = pdfium.PdfDocument(contenu_pdf)
-    for i in range(len(pdf)):
-        page = pdf[i]
-        bitmap = page.render(scale=2.5)
-        pil_image = bitmap.to_pil()
-        txt = pytesseract.image_to_string(pil_image, lang="fra")
-        textes.append(txt)
-    return "\n".join(textes)
-
-
-# Marqueurs de fin de liste des articles (tout ce qui suit est du paiement, TVA ou fidélité)
-FIN_LISTE_ARTICLES = re.compile(
-    r"\b(TOTAL|SOUS[\s\-]?TOTAL|MONTANT\s+DU|MONTANT\s+DÛ|NET\s+A\s+PAYER|A\s+PAYER|"
-    r"CB\s+EMV|CARTE\s+BANCAIRE|PAIEMENT|REGLEMENT|A\s+RENDRE|RENDU\s+MONNAIE|"
-    r"NOMBRE\s+D['\s]?ARTICLES|NB\s+ARTICLES|ARTICLES\s+VENDUS|RECAPITULATIF\s+TVA)\b",
-    re.IGNORECASE,
-)
-
-# Extraction du compteur officiel X (ex: "NOMBRE D'ARTICLES VENDUS : 9", "9 ARTICLES", "ARTICLES : 9")
-COMPTEUR_ARTICLES = re.compile(
-    r"(?:NOMBRE\s+D['\s]?ARTICLES(?:\s+VENDUS)?|NB\s+ARTICLES|ARTICLES\s+VENDUS)\s*[:=]?\s*(\d+)"
-    r"|\b(\d+)\s+ARTICLES?\b",
-    re.IGNORECASE,
-)
-
-# Lignes parasites éventuelles au sein même de la liste
-EXCLUSIONS_LIGNES = re.compile(
-    r"\b(TVA|FIDELITE|CARTE\s+FID|PORTEUR|COMPTE\s+FID|CAGNOTTE|AVANTAGE|REMISE\s+FID|"
-    r"IL\s+VOUS\s+RESTAIT|SOLDE|TICKET|DUPLICATA|SIRET|CAISSE|HOTESSE)\b|\d{2}/\d{2}/\d{4}",
-    re.IGNORECASE,
-)
 
 
 def extraire_nb_articles_attendu(texte: str) -> int | None:
@@ -238,22 +218,31 @@ def _parser_articles(lignes: list[str], nb_attendu: int | None = None) -> list[A
     return articles
 
 
-def lire_ticket_bytes(contenu_pdf: bytes, nom_fichier: str = "ticket.pdf") -> Ticket:
-    """Lit un ticket PDF directement depuis la mémoire (sans conserver le fichier sur disque)."""
+def lire_ticket_bytes(contenu: bytes, nom_fichier: str) -> Ticket:
+    texte = ""
     methode = "texte_pdf"
-    with pdfplumber.open(io.BytesIO(contenu_pdf)) as pdf:
-        texte = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    articles: list[Article] = []
 
-    if len(texte.strip()) < 30:
-        texte_ocr = _extraire_texte_ocr(contenu_pdf)
+    # 1. Si c'est un PDF, on tente d'abord pdfplumber (texte natif)
+    if nom_fichier.lower().endswith(".pdf"):
+        with pdfplumber.open(io.BytesIO(contenu)) as pdf:
+            pages_txt = [p.extract_text() or "" for p in pdf.pages]
+            texte = "\n".join(pages_txt).strip()
+        if texte:
+            nb_attendu = extraire_nb_articles_attendu(texte)
+            articles = _parser_articles(texte.splitlines(), nb_attendu=nb_attendu)
+
+    # 2. Si c'est une photo OU un PDF sans texte natif OU un PDF dont les colonnes étaient désalignées -> OCR
+    if not articles:
+        texte_ocr = _extraire_texte_ocr(contenu, nom_fichier)
         if texte_ocr.strip():
             texte = texte_ocr
             methode = "ocr"
+            nb_attendu = extraire_nb_articles_attendu(texte)
+            articles = _parser_articles(texte.splitlines(), nb_attendu=nb_attendu)
 
     enseigne = detecter_enseigne(texte, nom_fichier)
     d = extraire_date(texte, nom_fichier)
-    nb_attendu = extraire_nb_articles_attendu(texte)
-    articles = _parser_articles(texte.splitlines(), nb_attendu=nb_attendu)
 
     return Ticket(
         nom_fichier=nom_fichier,
